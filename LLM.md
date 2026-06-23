@@ -1,6 +1,6 @@
 # `@luxwallet/connect`
 
-**Project**: `luxwallet/wallet-connect` — multi-chain wallet connect + Sign-In-With-X.
+**Project**: `luxwallet/connect` — multi-chain wallet connect + Sign-In-With-X.
 **Org**: `luxwallet` (the wallet product org; MIT, clean of GPL).
 **License**: MIT. **Hard rule: zero GPL deps, ever** — the Uniswap-derived GPL
 bones live in `luxfi/exchange` and are eaten away there, never imported here.
@@ -10,7 +10,7 @@ bones live in `luxfi/exchange` and are eaten away there, never imported here.
 The one canonical way for any Hanzo/Lux/Zoo/Pars surface to authenticate a
 wallet on EVM, Solana, Bitcoin, TON, or XRP. Replaces the EVM-only
 `@web3-onboard` path in IAM and becomes the connect layer for the browser
-extension (`luxwallet/wallet-connect` → extension) and the native apps
+extension (`luxwallet/connect` → extension) and the native apps
 (`luxwallet/unstoppable-wallet-{android,ios}`).
 
 ## Decomplected design (Hickey)
@@ -110,7 +110,7 @@ is `(BSD-3-Clause OR GPL-2.0)` — we elect BSD-3-Clause. No GPL obligation.
 
 ## Consumers (the wallet product line, all under `luxwallet`)
 
-- `luxwallet/wallet-connect` (this) — SDK: web + extension connect/login.
+- `luxwallet/connect` (this) — SDK: web + extension connect/login.
 - `luxwallet/unstoppable-wallet-android` — MIT fork of Horizontal Systems (Kotlin). Chains OOTB: BTC, EVM, Solana, TON. **XRP needs a kit.**
 - `luxwallet/unstoppable-wallet-ios` — MIT fork (Swift). Same chain coverage.
 

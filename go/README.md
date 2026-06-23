@@ -5,7 +5,7 @@ Go port of the `@luxwallet/connect` login verifier. Mirrors the TypeScript
 identically to `verifyProof`: same CAIP-122 message parse, same
 domain/nonce/time checks, same EIP-191 digest, same ed25519 check.
 
-Module: `github.com/luxwallet/wallet-connect/go`
+Module: `github.com/luxwallet/connect/go`
 Package: `walletconnect`
 
 ## API
