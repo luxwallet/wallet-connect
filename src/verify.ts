@@ -11,6 +11,9 @@ import type { SignedProof, VerifyExpectation, VerifyResult, Chain } from './type
 import { parseSiwxMessage } from './caip122.js';
 import { verifyEvm } from './evm/verify.js';
 import { verifySolana } from './solana/verify.js';
+import { verifyTon } from './ton/verify.js';
+import { verifyBitcoin } from './bitcoin/verify.js';
+import { verifyXrp } from './xrp/verify.js';
 
 const DEFAULT_SKEW_MS = 5 * 60 * 1000;
 
@@ -39,12 +42,13 @@ function verifyCrypto(proof: SignedProof): boolean | null {
     case 'ed25519':
       // ed25519-over-message is Solana today; TON uses 'ton-proof'.
       return verifySolana(proof.message, proof.signature, proof.address);
-    // Implemented in follow-up modules; fail closed until then.
-    case 'bip322':
     case 'ton-proof':
+      return verifyTon(proof);
+    case 'bip322':
+      return verifyBitcoin(proof);
     case 'secp256k1-xrpl':
     case 'ed25519-xrpl':
-      return null;
+      return verifyXrp(proof);
     default:
       return null;
   }

@@ -124,10 +124,17 @@ describe('verifyProof end-to-end', () => {
     expect(res.reason).toBe('expired');
   });
 
-  it('fails closed on not-yet-implemented schemes', () => {
+  it('fails closed on an unknown scheme', () => {
+    const challenge = newChallenge(base);
+    const message = buildSiwxMessage({ challenge, address: 'rXYZ', chain: 'xrp' });
+    const proof = { chain: 'xrp', scheme: 'totally-unknown', address: 'rXYZ', message, signature: '00' } as unknown as SignedProof;
+    expect(verifyProof(proof, { domain: 'hanzo.id', nonce: 'abc12345', now }).reason).toBe('unsupported-scheme');
+  });
+
+  it('fails closed (bad-signature) on a wired-but-unverifiable proof', () => {
     const challenge = newChallenge(base);
     const message = buildSiwxMessage({ challenge, address: 'rXYZ', chain: 'xrp' });
     const proof: SignedProof = { chain: 'xrp', scheme: 'secp256k1-xrpl', address: 'rXYZ', message, signature: '00' };
-    expect(verifyProof(proof, { domain: 'hanzo.id', nonce: 'abc12345', now }).reason).toBe('unsupported-scheme');
+    expect(verifyProof(proof, { domain: 'hanzo.id', nonce: 'abc12345', now }).ok).toBe(false);
   });
 });

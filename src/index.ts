@@ -30,3 +30,6 @@ export { verifyProof } from './verify.js';
 // Per-chain primitives (useful standalone; the connectors build on them).
 export { verifyEvm, recoverEvmAddress, eip191Digest } from './evm/verify.js';
 export { verifySolana } from './solana/verify.js';
+export { verifyTon } from './ton/verify.js';
+export { verifyBitcoin } from './bitcoin/verify.js';
+export { verifyXrp } from './xrp/verify.js';
