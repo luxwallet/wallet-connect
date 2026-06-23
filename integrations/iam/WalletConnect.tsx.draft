@@ -1,0 +1,161 @@
+// DRAFT — destination: github.com/hanzoai/iam/web/src/auth/WalletConnect.tsx
+//
+// Replaces Web3Auth.tsx's @web3-onboard (EVM-only) path with @luxwallet/connect's
+// multi-chain connectors. One picker over EVM / Solana / Bitcoin / TON / XRP; each
+// produces a SignedProof that POSTs to /v1/iam/web3/verify.
+//
+// Flow per chain (orthogonal — connection is browser-side, verification is server):
+//   1. connector.connect()            -> Account {chain,address,publicKey?,walletId}
+//   2. GET /v1/iam/web3/nonce         -> LoginChallenge {domain,uri,nonce,...}
+//   3. connector.signLogin(acct, ch)  -> SignedProof {chain,scheme,address,message,signature,...}
+//   4. POST /v1/iam/web3/verify       -> {status:"ok", data:<session/redirect>}
+//
+// HIP-0111: hit /v1/iam/web3/* directly. NEVER /api/, NEVER /oauth.
+
+// @ts-nocheck
+import i18next from "i18next";
+import {goToLink, showMessage} from "../Setting";
+import {
+  CHAINS,
+  type Chain,
+  type Account,
+  type LoginChallenge,
+  type SignedProof,
+  type WalletConnector,
+} from "@luxwallet/connect";
+
+// Per-chain connectors. These live in @luxwallet/connect/connectors (the SDK's
+// browser side — currently TODO; each wraps the chain's wallet lib below).
+//   evm     -> viem/wagmi               (MIT)
+//   solana  -> @solana/wallet-adapter   (Apache-2.0)
+//   bitcoin -> sats-connect             (ISC)  — Xverse/Leather, BIP-322
+//   ton     -> @tonconnect/ui           (Apache-2.0)
+//   xrp     -> @gemwallet/api (MIT) / xrpl (ISC)
+import {
+  EvmConnector,
+  SolanaConnector,
+  BitcoinConnector,
+  TonConnector,
+  XrpConnector,
+} from "@luxwallet/connect/connectors";
+
+const CONNECTORS: Record<Chain, WalletConnector> = {
+  evm: new EvmConnector(),
+  solana: new SolanaConnector(),
+  bitcoin: new BitcoinConnector(),
+  ton: new TonConnector(),
+  xrp: new XrpConnector(),
+};
+
+const CHAIN_LABEL: Record<Chain, string> = {
+  evm: "Ethereum / EVM",
+  solana: "Solana",
+  bitcoin: "Bitcoin",
+  ton: "TON",
+  xrp: "XRP Ledger",
+};
+
+// Backend verifiers that are live today. Bitcoin/TON/XRP Go ports are stubs that
+// fail closed, so we gate them off the picker until they land (see PLAN.md risk 5).
+const ENABLED_CHAINS: Chain[] = ["evm", "solana"];
+
+function apiBase() {
+  // Same-origin canonical IAM API root. The brand host (hanzo.id) proxies
+  // /v1/iam/* to iam.hanzo.ai; never construct an /api/ path.
+  return "/v1/iam";
+}
+
+async function fetchNonce(chain: Chain, address: string): Promise<LoginChallenge> {
+  const url = `${apiBase()}/web3/nonce?chain=${encodeURIComponent(chain)}&address=${encodeURIComponent(address)}`;
+  const res = await fetch(url, {method: "GET", credentials: "include"});
+  const body = await res.json();
+  if (body.status !== "ok") {
+    throw new Error(body.msg || "failed to obtain login nonce");
+  }
+  // body.data is the Web3NonceResponse, shaped as a LoginChallenge.
+  return body.data as LoginChallenge;
+}
+
+async function postVerify(application, organization, method: string, proof: SignedProof) {
+  const res = await fetch(`${apiBase()}/web3/verify`, {
+    method: "POST",
+    credentials: "include",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      organization,
+      application,
+      method,
+      chain: proof.chain,
+      scheme: proof.scheme,
+      address: proof.address,
+      publicKey: proof.publicKey,
+      message: proof.message,
+      signature: proof.signature,
+      extra: proof.extra,
+    }),
+  });
+  return res.json();
+}
+
+/**
+ * Drive one chain end-to-end: connect -> nonce -> sign -> verify -> redirect.
+ * Used by the picker; also callable directly for a single-chain button.
+ */
+export async function authViaWallet(application, provider, method: string, chain: Chain) {
+  const connector = CONNECTORS[chain];
+  if (!connector) {
+    showMessage("error", `${i18next.t("login:Unsupported chain")}: ${chain}`);
+    return;
+  }
+  try {
+    const account: Account = await connector.connect();
+
+    const challenge: LoginChallenge = await fetchNonce(chain, account.address);
+
+    // The connector renders the challenge to the canonical CAIP-122 message
+    // (TON uses its ton_proof envelope internally) and asks the wallet to sign.
+    const proof: SignedProof = await connector.signLogin(account, challenge);
+
+    const result = await postVerify(
+      application?.name ?? provider?.application,
+      application?.organization ?? provider?.organization,
+      method || "signup",
+      proof,
+    );
+
+    if (result.status === "ok") {
+      // Mirror the password/OAuth success path: HandleLoggedIn returns either a
+      // redirect target or a logged-in payload the SPA consumes.
+      if (typeof result.data === "string") {
+        goToLink(result.data);
+      } else if (result.data?.redirectUrl) {
+        goToLink(result.data.redirectUrl);
+      } else {
+        window.location.reload();
+      }
+    } else {
+      showMessage("error", `${i18next.t("login:Wallet sign-in failed")}: ${result.msg}`);
+    }
+  } catch (err) {
+    showMessage("error", `${i18next.t("login:Wallet sign-in failed")}: ${err?.message ?? err}`);
+  } finally {
+    try {
+      await connector.disconnect();
+    } catch (_) { /* best-effort */ }
+  }
+}
+
+/**
+ * The multi-chain picker the login page renders in place of the old
+ * web3-onboard button. Returns the list of enabled chains with metadata so the
+ * caller (LoginPage / SelfLoginButtonBox) can render buttons + icons.
+ */
+export function getWalletChains() {
+  return CHAINS
+    .filter((c) => ENABLED_CHAINS.includes(c))
+    .map((c) => ({
+      chain: c,
+      label: CHAIN_LABEL[c],
+      onClick: (application, provider, method) => authViaWallet(application, provider, method, c),
+    }));
+}

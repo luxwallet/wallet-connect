@@ -1,0 +1,10 @@
+// Self-contained workspace for the wallet-connect Go port.
+//
+// The parent /Users/z/work/lux/go.work does not list this module, so a bare
+// `go test ./...` from here would otherwise fail with "directory prefix .
+// does not contain modules listed in go.work". This local workspace scopes the
+// toolchain to just this module. It is intentionally NOT added to the shared
+// lux workspace.
+go 1.26.4
+
+use .

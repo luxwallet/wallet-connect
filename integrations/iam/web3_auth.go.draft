@@ -1,0 +1,311 @@
+// DRAFT — destination: github.com/hanzoai/iam/controllers/web3_auth.go
+//
+// Multi-chain wallet login for IAM, built on github.com/luxwallet/wallet-connect/go.
+// Replaces the unverified idp/metamask.go + idp/web3onboard.go path (which trusts
+// a client-supplied address with NO signature check) with one canonical, fail-closed
+// verify path that runs the SAME walletconnect.VerifyProof the TS SDK runs.
+//
+// HIP-0111: canonical paths under /v1/iam/... ONLY. Never /api/, never /oauth.
+//   GET  /v1/iam/web3/nonce   -> mint + store a single-use CAIP-122 challenge
+//   POST /v1/iam/web3/verify  -> verify a SignedProof, burn the nonce, log in
+//
+// DO NOT register these in routers/router.go yet (would break the build until the
+// module is published / replace-d). The router diff is in PLAN.md.
+
+package controllers
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/hanzoai/iam/object"
+	"github.com/hanzoai/iam/util"
+
+	wc "github.com/luxwallet/wallet-connect/go/walletconnect"
+)
+
+// web3Domain is the RFC-4501 dnsauthority the wallet signs against. It MUST equal
+// the brand login host (hanzo.id / lux.id / zoo.id / pars.id), not the API host,
+// and MUST match what the frontend renders into the CAIP-122 message. Phishing
+// protection rides entirely on this binding, so it is derived from the request
+// host, not taken from the client.
+func (c *ApiController) web3Domain() string {
+	// getEffectiveHost() already resolves the brand host behind the ingress.
+	return c.getEffectiveHost()
+}
+
+// Web3NonceResponse is the LoginChallenge the frontend feeds to
+// connector.signLogin(). Field names mirror walletconnect.LoginChallenge /
+// the TS LoginChallenge so the JS side can pass it through unchanged.
+type Web3NonceResponse struct {
+	Domain         string `json:"domain"`
+	URI            string `json:"uri"`
+	Statement      string `json:"statement,omitempty"`
+	Nonce          string `json:"nonce"`
+	IssuedAt       string `json:"issuedAt"`
+	ExpirationTime string `json:"expirationTime,omitempty"`
+	Version        string `json:"version"`
+	RequestID      string `json:"requestId,omitempty"`
+}
+
+// GetWeb3Nonce mints a single-use login nonce and returns the CAIP-122 challenge.
+//
+// Route: GET /v1/iam/web3/nonce?chain=<evm|solana|bitcoin|ton|xrp>&address=<addr>
+//
+// The (chain,address) are advisory here (they let us scope/rate-limit the nonce);
+// the authoritative binding happens in VerifyProof against the SIGNED message.
+func (c *ApiController) GetWeb3Nonce() {
+	chain := wc.Chain(strings.TrimSpace(c.Input().Get("chain")))
+	address := strings.TrimSpace(c.Input().Get("address"))
+
+	if !isSupportedChain(chain) {
+		c.ResponseError(fmt.Sprintf("web3: unsupported chain: %s", chain))
+		return
+	}
+
+	const ttl = 10 * time.Minute
+	now := time.Now().UTC()
+
+	// 16 alphanumerics ~ 95 bits; mirrors the SDK's generateNonce() default.
+	nonce := util.GenerateSimpleTimeId() // 36 hex chars; >= the CAIP-122 minimum of 8
+	domain := c.web3Domain()
+	uri := fmt.Sprintf("https://%s/login", domain)
+
+	rec := &object.Web3Nonce{
+		Owner:          "built-in", // nonce store is global; not org-scoped
+		Name:           nonce,
+		Chain:          string(chain),
+		Address:        address,
+		Domain:         domain,
+		CreatedTime:    util.GetCurrentTime(),
+		ExpireTime:     now.Add(ttl).Format(time.RFC3339),
+		Used:           false,
+	}
+	if _, err := object.AddWeb3Nonce(rec); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	c.ResponseOk(&Web3NonceResponse{
+		Domain:         domain,
+		URI:            uri,
+		Statement:      "Sign in to Hanzo. This request will not trigger a blockchain transaction or cost any gas.",
+		Nonce:          nonce,
+		IssuedAt:       now.Format(time.RFC3339),
+		ExpirationTime: now.Add(ttl).Format(time.RFC3339),
+		Version:        "1",
+	})
+}
+
+// Web3VerifyForm is the POST body the frontend sends after the wallet signs.
+// It is exactly a walletconnect SignedProof plus the routing fields IAM needs to
+// resolve the application/organization and pick signup vs login.
+type Web3VerifyForm struct {
+	Organization string                 `json:"organization"`
+	Application  string                 `json:"application"`
+	Method       string                 `json:"method"` // "signup" (default) | "login"
+	Chain        string                 `json:"chain"`
+	Scheme       string                 `json:"scheme"`
+	Address      string                 `json:"address"`
+	PublicKey    string                 `json:"publicKey,omitempty"`
+	Message      string                 `json:"message"`
+	Signature    string                 `json:"signature"`
+	Extra        map[string]interface{} `json:"extra,omitempty"`
+}
+
+// VerifyWeb3 verifies a multi-chain wallet login proof and signs the user in.
+//
+// Route: POST /v1/iam/web3/verify
+//
+// Pipeline (fail closed at every step):
+//  1. Parse body -> SignedProof.
+//  2. Burn the nonce atomically (single-use; UPDATE ... WHERE used=false). The
+//     burn must succeed BEFORE crypto so a captured proof can never be replayed.
+//  3. walletconnect.VerifyProof(proof, expectation) — domain+nonce+time+crypto.
+//  4. Resolve (chain,address) -> user via the WalletLink table; auto-provision on
+//     signup; then HandleLoggedIn -> session + JWT, identical to Login().
+func (c *ApiController) VerifyWeb3() {
+	var form Web3VerifyForm
+	if err := json.Unmarshal(c.Ctx.Input.RequestBody, &form); err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	chain := wc.Chain(strings.TrimSpace(form.Chain))
+	if !isSupportedChain(chain) {
+		c.ResponseError(fmt.Sprintf("web3: unsupported chain: %s", chain))
+		return
+	}
+
+	parsed, err := wc.ParseSiwxMessage(form.Message)
+	if err != nil {
+		c.ResponseError("web3: malformed login message")
+		return
+	}
+	nonce := parsed.Nonce
+
+	// --- 2. Burn the nonce FIRST. Atomic single-use; rejects replay. ---
+	rec, err := object.BurnWeb3Nonce(nonce)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+	if rec == nil {
+		// Unknown, already-used, or expired nonce.
+		c.ResponseError("web3: nonce invalid, already used, or expired")
+		return
+	}
+	if rec.Domain != c.web3Domain() {
+		c.ResponseError("web3: domain mismatch")
+		return
+	}
+
+	// --- 3. Cryptographic verification via the shared SDK. ---
+	res := wc.VerifyProof(wc.Proof{
+		Chain:     chain,
+		Scheme:    wc.SignatureScheme(form.Scheme),
+		Address:   form.Address,
+		PublicKey: form.PublicKey,
+		Message:   form.Message,
+		Signature: form.Signature,
+		Extra:     form.Extra,
+	}, wc.Expectation{
+		Domain:    rec.Domain,
+		Nonce:     nonce,
+		ClockSkew: wc.DefaultClockSkew,
+		// Now: zero -> time.Now()
+	})
+	if !res.OK {
+		// res.Reason is a stable machine code (bad-signature, expired, ...).
+		c.ResponseError(fmt.Sprintf("web3: verification failed: %s", res.Reason))
+		return
+	}
+	verifiedAddress := res.Address // canonicalized by the verifier
+
+	// --- 4. Resolve / provision the casdoor user. ---
+	application, err := object.GetApplication(util.GetId("admin", form.Application))
+	if err != nil || application == nil {
+		c.ResponseError(c.T("auth:Failed to login in: application not found"))
+		return
+	}
+	organization, err := object.GetOrganization(util.GetId("admin", application.Organization))
+	if err != nil || organization == nil {
+		c.ResponseError("web3: organization not found")
+		return
+	}
+
+	// One user, N wallets across chains: WalletLink is the lookup key.
+	link, err := object.GetWalletLink(application.Organization, string(chain), verifiedAddress)
+	if err != nil {
+		c.ResponseError(err.Error())
+		return
+	}
+
+	var user *object.User
+	if link != nil {
+		user, err = object.GetUser(util.GetId(link.Owner, link.User))
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+	}
+
+	if user == nil {
+		// No wallet on file. If the caller is already authenticated (linking a new
+		// wallet to an existing identity), attach to that session's user. We NEVER
+		// link by address alone across identities — that would let a wallet hijack
+		// a social/password account.
+		if sessionUser := c.getCurrentUser(); sessionUser != nil {
+			user = sessionUser
+		} else {
+			if form.Method == "login" {
+				c.ResponseError("web3: no account is linked to this wallet")
+				return
+			}
+			if !application.EnableSignUp {
+				c.ResponseError(c.T("auth:The account does not exist and sign up is disabled"))
+				return
+			}
+			user, err = provisionWalletUser(application, organization, chain, verifiedAddress)
+			if err != nil {
+				c.ResponseError(err.Error())
+				return
+			}
+		}
+
+		// Persist the link (unique on (chain,address)).
+		if _, err = object.AddWalletLink(&object.WalletLink{
+			Owner:       user.Owner,
+			User:        user.Name,
+			Chain:       string(chain),
+			Address:     verifiedAddress,
+			Scheme:      form.Scheme,
+			PublicKey:   form.PublicKey,
+			CreatedTime: util.GetCurrentTime(),
+		}); err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+	}
+
+	if user.IsForbidden || user.IsDeleted {
+		c.ResponseError(c.T("check:The user is forbidden to sign in, please contact the administrator"))
+		return
+	}
+
+	// MFA gate (shared with the password/OAuth paths).
+	if checkMfaEnable(c, user, organization, object.MfaCategoryGlobal) {
+		return
+	}
+
+	authForm := AuthForm{Application: form.Application, Organization: form.Organization}
+	resp := c.HandleLoggedIn(application, user, &authForm)
+	c.Ctx.Input.SetParam("recordUserId", user.GetId())
+	c.ResponseOk(resp)
+}
+
+// provisionWalletUser creates a fresh casdoor user for a first-seen wallet. The
+// username mirrors the legacy "<walletType>_<address>" shape but chain-qualified:
+// "<chain>_<address>". No password is set (wallet-only identity); the user can add
+// email/password later from account settings.
+func provisionWalletUser(app *object.Application, org *object.Organization, chain wc.Chain, address string) (*object.User, error) {
+	username := fmt.Sprintf("%s_%s", chain, address)
+	if org.UseEmailAsUsername {
+		// No email yet; fall back to the wallet username.
+	}
+	user := &object.User{
+		Owner:             app.Organization,
+		Name:              username,
+		CreatedTime:       util.GetCurrentTime(),
+		Id:                util.GenerateId(),
+		Type:              "normal-user",
+		DisplayName:       fmt.Sprintf("%s:%s", chain, shortAddr(address)),
+		Avatar:            org.DefaultAvatar,
+		SignupApplication: app.Name,
+		Properties:        map[string]string{},
+	}
+	if affected, err := object.AddUser(user, "en"); err != nil {
+		return nil, err
+	} else if !affected {
+		return nil, fmt.Errorf("web3: failed to create wallet user")
+	}
+	return user, nil
+}
+
+func shortAddr(a string) string {
+	if len(a) <= 12 {
+		return a
+	}
+	return a[:6] + "…" + a[len(a)-4:]
+}
+
+func isSupportedChain(c wc.Chain) bool {
+	switch c {
+	case wc.ChainEVM, wc.ChainSolana, wc.ChainBitcoin, wc.ChainTON, wc.ChainXRP:
+		return true
+	default:
+		return false
+	}
+}
