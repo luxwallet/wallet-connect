@@ -8,16 +8,46 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./verify": "./src/verify.ts",
-    "./caip122": "./src/caip122.ts",
-    "./connectors": "./src/connectors.ts",
-    "./login": "./src/login.ts",
-    "./evm/connect": "./src/evm/connect.ts",
-    "./solana/connect": "./src/solana/connect.ts",
-    "./bitcoin/connect": "./src/bitcoin/connect.ts",
-    "./ton/connect": "./src/ton/connect.ts",
-    "./xrp/connect": "./src/xrp/connect.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./verify": {
+      "types": "./dist/verify.d.ts",
+      "default": "./dist/verify.js"
+    },
+    "./caip122": {
+      "types": "./dist/caip122.d.ts",
+      "default": "./dist/caip122.js"
+    },
+    "./connectors": {
+      "types": "./dist/connectors.d.ts",
+      "default": "./dist/connectors.js"
+    },
+    "./login": {
+      "types": "./dist/login.d.ts",
+      "default": "./dist/login.js"
+    },
+    "./evm/connect": {
+      "types": "./dist/evm/connect.d.ts",
+      "default": "./dist/evm/connect.js"
+    },
+    "./solana/connect": {
+      "types": "./dist/solana/connect.d.ts",
+      "default": "./dist/solana/connect.js"
+    },
+    "./bitcoin/connect": {
+      "types": "./dist/bitcoin/connect.d.ts",
+      "default": "./dist/bitcoin/connect.js"
+    },
+    "./ton/connect": {
+      "types": "./dist/ton/connect.d.ts",
+      "default": "./dist/ton/connect.js"
+    },
+    "./xrp/connect": {
+      "types": "./dist/xrp/connect.d.ts",
+      "default": "./dist/xrp/connect.js"
+    }
   },
   "files": [
     "dist",
@@ -25,6 +55,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
