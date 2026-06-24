@@ -23,6 +23,7 @@ const (
 	ChainTON      Chain = "ton"
 	ChainXRP      Chain = "xrp"
 	ChainPolkadot Chain = "polkadot"
+	ChainCardano  Chain = "cardano"
 )
 
 // chainLabel is the human chain label used on the first line of the message.
@@ -34,6 +35,7 @@ var chainLabel = map[Chain]string{
 	ChainTON:      "TON",
 	ChainXRP:      "XRP Ledger",
 	ChainPolkadot: "Polkadot",
+	ChainCardano:  "Cardano",
 }
 
 // ParsedSiwx is the result of parsing a CAIP-122 message. Optional fields use

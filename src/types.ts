@@ -7,9 +7,9 @@
  */
 
 /** Supported chain families. Values, not places — namespaced by this union. */
-export type Chain = 'evm' | 'solana' | 'bitcoin' | 'ton' | 'xrp' | 'polkadot';
+export type Chain = 'evm' | 'solana' | 'bitcoin' | 'ton' | 'xrp' | 'polkadot' | 'cardano';
 
-export const CHAINS: readonly Chain[] = ['evm', 'solana', 'bitcoin', 'ton', 'xrp', 'polkadot'];
+export const CHAINS: readonly Chain[] = ['evm', 'solana', 'bitcoin', 'ton', 'xrp', 'polkadot', 'cardano'];
 
 /**
  * Signature scheme used to produce a proof. The verifier dispatches on this,
@@ -24,7 +24,8 @@ export type SignatureScheme =
   | 'ed25519-xrpl' // XRPL ed25519 keypair
   | 'sr25519' // Polkadot/Substrate default (Schnorrkel over Ristretto255)
   | 'ed25519-substrate' // Polkadot/Substrate ed25519 accounts
-  | 'ecdsa-substrate'; // Polkadot/Substrate ecdsa (secp256k1) accounts
+  | 'ecdsa-substrate' // Polkadot/Substrate ecdsa (secp256k1) accounts
+  | 'ed25519-cardano'; // Cardano CIP-8/CIP-30 signData (ed25519 inside COSE_Sign1)
 
 /** A connected wallet account. `publicKey` is required where the address is not recoverable from the signature (Solana, TON, XRP). */
 export interface Account {

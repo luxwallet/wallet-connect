@@ -19,6 +19,7 @@ const (
 	SchemeSr25519         SignatureScheme = "sr25519"           // Polkadot/Substrate default (Schnorrkel/Ristretto255)
 	SchemeEd25519Substr   SignatureScheme = "ed25519-substrate" // Polkadot/Substrate ed25519 accounts
 	SchemeEcdsaSubstr     SignatureScheme = "ecdsa-substrate"   // Polkadot/Substrate ecdsa (secp256k1) accounts
+	SchemeEd25519Cardano  SignatureScheme = "ed25519-cardano"   // Cardano CIP-8/CIP-30 signData (ed25519 in COSE_Sign1)
 )
 
 // Proof is what a wallet hands back after signing — everything the server needs
@@ -120,6 +121,8 @@ func crypto(p Proof) (ok, supported bool) {
 		return VerifyXrp(p), true
 	case SchemeSr25519, SchemeEd25519Substr, SchemeEcdsaSubstr:
 		return VerifyPolkadot(p), true
+	case SchemeEd25519Cardano:
+		return VerifyCardano(p), true
 	default:
 		return false, false
 	}

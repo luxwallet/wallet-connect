@@ -10,9 +10,10 @@
  * Two entry points, same checks:
  *   - {@link verifyProof}      — synchronous, covers the five @noble-pure
  *     chains (evm/solana/bitcoin/ton/xrp). Pulls no WASM.
- *   - {@link verifyProofAsync} — covers ALL chains including Polkadot, whose
- *     sr25519 verify needs `cryptoWaitReady()`. It delegates the five sync
- *     chains to the same code and awaits the Substrate verifier for the rest.
+ *   - {@link verifyProofAsync} — covers ALL chains including Polkadot (whose
+ *     sr25519 verify needs `cryptoWaitReady()`) and Cardano (CIP-8 COSE_Sign1).
+ *     It delegates the five sync chains to the same code and lazy-loads the
+ *     Substrate / Cardano verifiers for the rest.
  */
 import type { SignedProof, VerifyExpectation, VerifyResult, Chain } from './types.js';
 import { parseSiwxMessage } from './caip122.js';
@@ -153,6 +154,13 @@ export async function verifyProofAsync(
     case 'ecdsa-substrate': {
       const { verifyPolkadot } = await import('./polkadot/verify.js');
       return finish(proof, await verifyPolkadot(proof));
+    }
+    case 'ed25519-cardano': {
+      // Cardano's verifier is pure-synchronous (@noble + inline CBOR/bech32, no
+      // WASM), but it is lazy-loaded here so the sync verify core never pulls
+      // the CBOR/bech32 modules. Sits on the async path with Polkadot.
+      const { verifyCardano } = await import('./cardano/verify.js');
+      return finish(proof, verifyCardano(proof));
     }
     default: {
       const crypto = verifyCrypto(proof);

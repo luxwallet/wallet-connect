@@ -35,6 +35,8 @@ export { verifyBitcoin } from './bitcoin/verify.js';
 export { verifyXrp } from './xrp/verify.js';
 // Polkadot/Substrate is async (sr25519 needs cryptoWaitReady); see ./polkadot/verify.
 export { verifyPolkadot } from './polkadot/verify.js';
+// Cardano CIP-8/CIP-30 (ed25519 over COSE_Sign1); pure-sync but routed via verifyProofAsync.
+export { verifyCardano } from './cardano/verify.js';
 
 // Browser wallet connectors + the high-level login flow. These import the
 // wallet libraries (viem, sats-connect, @tonconnect/sdk, @crossmarkio/sdk);
@@ -48,6 +50,7 @@ export {
   TonConnector,
   XrpConnector,
   PolkadotConnector,
+  CardanoConnector,
 } from './connectors.js';
 export type { ConnectorOptions, TonConnectorOptions } from './connectors.js';
 export { loginWithWallet } from './login.js';

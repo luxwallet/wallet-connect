@@ -1,7 +1,7 @@
 {
   "name": "@luxwallet/connect",
   "version": "0.1.0",
-  "description": "Multi-chain wallet connect + Sign-In-With-X (CAIP-122) for EVM, Solana, Bitcoin, TON, XRP, Polkadot. MIT, zero GPL.",
+  "description": "Multi-chain wallet connect + Sign-In-With-X (CAIP-122) for EVM, Solana, Bitcoin, TON, XRP, Polkadot, Cardano. MIT, zero GPL.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -55,6 +55,14 @@
     "./polkadot/verify": {
       "types": "./dist/polkadot/verify.d.ts",
       "default": "./dist/polkadot/verify.js"
+    },
+    "./cardano/connect": {
+      "types": "./dist/cardano/connect.d.ts",
+      "default": "./dist/cardano/connect.js"
+    },
+    "./cardano/verify": {
+      "types": "./dist/cardano/verify.d.ts",
+      "default": "./dist/cardano/verify.js"
     }
   },
   "files": [
